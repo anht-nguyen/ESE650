@@ -29,7 +29,7 @@ class Quaternion:
         theta = math.asin(2*(self.q[0]*self.q[2] - self.q[3]*self.q[1]))
         psi = math.atan2(2*(self.q[0]*self.q[3]+self.q[1]*self.q[2]), \
                 1 - 2*(self.q[2]**2 + self.q[3]**2))
-        return np.array([phi, theta, psi])
+        return np.array([phi, theta, psi]) #roll pitch yaw
 
     def from_axis_angle(self, a):
         angle = np.linalg.norm(a)

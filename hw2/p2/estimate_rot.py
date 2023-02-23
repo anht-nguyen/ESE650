@@ -25,24 +25,52 @@ def estimate_rot(data_num=1):
     # return roll,pitch,yaw
 
 
-def rotation_angles(matrix):
-    r11, r12, r13 = matrix[0]
-    r21, r22, r23 = matrix[1]
-    r31, r32, r33 = matrix[2]
 
-    yaw = np.arctan(r21 / r11) # alpha #z
-    pitch = np.arctan(-r31 / np.sqrt(r32**2 + r33**2)) #beta #y
-    roll = np.arctan(r32 / r33) #sigma #x
-    # Calculate the roll, pitch, and yaw angles
-    # pitch = np.arcsin(-R[2,0])
-    # roll = np.arctan2(R[2,1]/np.cos(pitch), R[2,2]/np.cos(pitch))
-    # yaw = np.arctan2(R[1,0]/np.cos(pitch), R[0,0]/np.cos(pitch))
 
-    return roll,pitch,yaw
+
+
+
+
+
+
+
+
+
+
+
+
+# def rotation_angles(matrix):
+#     r11, r12, r13 = matrix[0]
+#     r21, r22, r23 = matrix[1]
+#     r31, r32, r33 = matrix[2]
+
+#     yaw = np.arctan2(r21, r11) # alpha #z
+#     pitch = np.arctan2(-r31, np.sqrt(r32**2 + r33**2)) #beta #y
+#     roll = np.arctan2(r32, r33) #sigma #x
+#     # Calculate the roll, pitch, and yaw angles
+#     # pitch = np.arcsin(-R[2,0])
+#     # roll = np.arctan2(R[2,1]/np.cos(pitch), R[2,2]/np.cos(pitch))
+#     # yaw = np.arctan2(R[1,0]/np.cos(pitch), R[0,0]/np.cos(pitch))
+
+#     return roll,pitch,yaw
 
 
 def accel_2_euler(accel):
-    pitch = np.hstack([math.asin(accel[0,t]/np.sqrt(accel[0,t]**2+accel[1,t]**2+accel[2,t]**2)) for t in range(np.shape(accel)[1])])
+    pitch = np.hstack([math.asin(accel[0,t]/ 9.81) for t in range(np.shape(accel)[1])])
     roll = np.hstack([math.atan2(accel[1,t], accel[2,t]) for t in range(np.shape(accel)[1])])
     return np.vstack((roll, pitch))
 
+
+# def R_matrix_rotation(roll, pitch, yaw):
+#     Rx = np.array([[1, 0, 0],
+#                 [0, np.cos(roll), -np.sin(roll)],
+#                 [0, np.sin(roll), np.cos(roll)]])
+
+#     Ry = np.array([[np.cos(pitch), 0, np.sin(pitch)],
+#                 [0, 1, 0],
+#                 [-np.sin(pitch), 0, np.cos(pitch) ]])
+
+#     Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0],
+#                 [np.sin(yaw), np.cos(yaw), 0],
+#                 [0, 0, 1]])
+#     return Rx @ Ry @ Rz

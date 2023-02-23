@@ -2,6 +2,7 @@ from scipy import io
 import numpy as np
 from estimate_rot import rotation_angles, accel_2_euler
 import matplotlib.pyplot as plt
+from scipy.spatial.transform import Rotation
 
 
 data_num = 1
@@ -43,13 +44,9 @@ vicon = io.loadmat('vicon/viconRot'+str(data_num)+'.mat')
 T_vicon = np.shape(vicon['ts'])[1]
 ts_vicon = vicon['ts'].reshape(-1,)
 
-euler_vicon = np.vstack([rotation_angles(vicon['rots'][:,:,t]) for t in range(T_vicon)]).transpose()
-plt.subplot(2,2,4)
-for i in range(3):
-    plt.plot(ts_vicon, euler_vicon[i,:], label = angle_names[i])
-plt.legend()
-plt.title('Vicon Euler angles data')
-plt.show()
 
 
 print('DONE')
+
+
+
