@@ -14,7 +14,7 @@ import math
 
 
 
-def estimate_rot(data_num=1):
+def estimate_rot(data_num=3):
     '''
     roll, pitch, yaw are numpy arrays of length T
     return roll,pitch,yaw
@@ -39,13 +39,13 @@ def estimate_rot(data_num=1):
 
     # for i in range(3):
     #     plt.plot(np.arange(T), accel[i,:], label = 'accel '+ angle_names[i])
-    # plt.title('Plot IMU accel raw data')
+    # plt.title('Plot IMU accel calibrated data')
     # plt.legend()    
     # plt.show()
 
     # for i in range(3):
     #     plt.plot(np.arange(T), gyro[i,:], label = 'gyro '+ angle_names[i])
-    # plt.title('Plot IMU accel raw data')
+    # plt.title('Plot IMU gyro calibrated data')
     # plt.legend()    
     # plt.show()    
 
@@ -65,50 +65,62 @@ def estimate_rot(data_num=1):
     
     
     # process noise/dynamic noise
-    R = np.array([1, 1, 1, 1,1, 1])
+    R = np.array([1, 1, 1, 1, 1, 1]) 
     diag_R = np.diag(R)
     # measurement noise:
-    Q = np.array([1, 1, 1, 1, 1, 1])
+    Q = np.array([1, 1, 1, 1, 1, 1]) 
     diag_Q = np.diag(Q)
     
     roll_ukf = []
     pitch_ukf = []
     yaw_ukf = []
 
-    # T = 2000
+    mu_q_plot = []
+    cov_q_plot = []
+    mu_w_plot = []
+    cov_w_plot = []
+
+    # T = 1000
     for t in range(T-1):
-        print('\n=== ', t, ' ===')
+        print('=== ', t, ' ===')
         dt = ts_imu[t+1] - ts_imu[t]
 
         ## Step 1:  Propagate the dynamics
         # first compute the square root
-        # print(cov_k_k + diag_R*dt)
-        sqrt_cov = sqrtm(cov_k_k + diag_R*dt)
-        # print(sqrt_cov)
+        cov_k_k = cov_k_k + diag_R*dt
+        cov_k_k = np.diag(np.diag(cov_k_k))
+        print(cov_k_k)
+        sqrt_cov = sqrtm(cov_k_k)#.round(5))
+        print(sqrt_cov)
         sqrt_cov_cols = np.concatenate((sqrt_cov * np.sqrt(n), sqrt_cov * (-np.sqrt(n))), axis = 1)
         # print(sqrt_cov_cols)
         Q_bar = Quaternion( mu_k_k[0][0],  mu_k_k[0][1:4] )
         sigma_q = generate_sigma_q(sqrt_cov_cols, Q_bar)
         # print("\nsigma_q: ", sigma_q)
-        Q_bar, sigma_cov_q = propagating_q(sigma_q, Q_bar)
-        sigma_w, sigma_mu_w, sigma_cov_w = propagating_w(mu_k_k, sqrt_cov_cols)
+        Q_bar, error = propagating_q(sigma_q, Q_bar)
+        sigma_w, sigma_mu_w = propagating_w(mu_k_k, sqrt_cov_cols)
+        # print(sigma_mu_w)
 
         # Predicted mu and covariance of state
         mu_k1_k = (Q_bar.q, sigma_mu_w[0], sigma_mu_w[1], sigma_mu_w[2])
-        cov_k1_k = np.zeros((6,6))
-        cov_k1_k[:3, :3] = sigma_cov_q
-        cov_k1_k[3:, 3:] = sigma_cov_w
+        cov_k1_k = a_priori_cov(error, sigma_w, sigma_mu_w)
+        cov_k1_k = cov_k1_k.round(5)
+        # cov_k1_k = np.zeros((6,6))
+        # cov_k1_k[:3, :3] = sigma_cov_q
+        # cov_k1_k[3:, 3:] = sigma_cov_w
         print("Step 1 Flag")
 
         # Step 2: Update with measurements from accel and gyro
             # step 2.1: 
         # new sigma points for udpated state distribution N(mu_k1_k, cov_k1_k)
-        # print(cov_k1_k)
+        cov_k1_k = np.diag(np.diag(cov_k1_k))
+        print(cov_k1_k)
         sqrt_cov = sqrtm(cov_k1_k)# + diag_R*dt)
+        print(sqrt_cov)
         sqrt_cov_cols = np.concatenate((sqrt_cov * np.sqrt(n), sqrt_cov * (-np.sqrt(n))), axis = 1)
         updated_Q_bar = Quaternion(scalar = mu_k1_k[0][0], vec = mu_k1_k[0][1:4] )
         updated_sigma_q = generate_sigma_q(sqrt_cov_cols, updated_Q_bar)
-        updated_sigma_w, _,_ = propagating_w(mu_k1_k, sqrt_cov_cols)
+        updated_sigma_w, _ = propagating_w(mu_k1_k, sqrt_cov_cols)
             # here: sigma_q is list of 12 quaternions Q_sigma.q and sigma_w is array size (3,12) of angular velos part of sigma points
 
             # EK sec 2.3:
@@ -126,8 +138,8 @@ def estimate_rot(data_num=1):
         for i in range(2*n):
             Cov_yy += (y_sigma[i] - y_hat).reshape(6,1) @ (y_sigma[i] - y_hat).reshape(1,6)
 
-            diff_w = sigma_w[:,i] - mu_k1_k[1:4]
-            quat = Quaternion(scalar=sigma_q[i][0], vec=sigma_q[i][1:4])
+            diff_w = updated_sigma_w[:,i] - mu_k1_k[1:4]
+            quat = Quaternion(scalar=updated_sigma_q[i][0], vec=updated_sigma_q[i][1:4])
             diff_q = quat * Q_bar.inv() #Q_bar is quaternion component in mu_k1_k
             W_i_prime = np.append(diff_q.vec(), diff_w) #vector size(6,)
             Cov_xy += W_i_prime.reshape(6,1) @ (y_sigma[i] - y_hat).reshape(1,6) / (2*n)
@@ -148,7 +160,7 @@ def estimate_rot(data_num=1):
         mu_k1_k1 = (Q_mu_k1.q, mu_k1_k[1] + K_term[3], mu_k1_k[2] + K_term[4],  mu_k1_k[3] +K_term[5])
         cov_k1_k1 = cov_k1_k - K @ Cov_yy @ K.T
 
-        print("the end")
+        # print("the end")
         # print(mu_k1_k1)
         # print(cov_k1_k1)
 
@@ -156,6 +168,10 @@ def estimate_rot(data_num=1):
         roll_ukf.append(euler_angles[0])
         pitch_ukf.append(euler_angles[1])
         yaw_ukf.append(euler_angles[2])
+        mu_q_plot.append(Q_mu_k1.q)
+        cov_q_plot.append(np.diag(cov_k1_k1)[:3])
+        mu_w_plot.append(np.array(mu_k1_k1[1:4]))
+        cov_w_plot.append(np.diag(cov_k1_k1)[3:])
 
         # End iteration by the following update
         mu_k_k = mu_k1_k1
@@ -164,17 +180,49 @@ def estimate_rot(data_num=1):
     roll_ukf = np.array(roll_ukf)
     pitch_ukf = np.array(pitch_ukf)
     yaw_ukf = np.array(yaw_ukf) 
-    plt.subplot(3,1,1)
-    plt.plot(np.arange(T-1), roll_ukf.reshape(-1))
-    plt.title('roll')
+    # plt.subplot(3,1,1)
+    # plt.plot(np.arange(T-1), roll_ukf.reshape(-1))
+    # plt.title('roll')
 
-    plt.subplot(3,1,2)
-    plt.plot(np.arange(T-1), pitch_ukf.reshape(-1))
-    plt.title('pitch')
+    # plt.subplot(3,1,2)
+    # plt.plot(np.arange(T-1), pitch_ukf.reshape(-1))
+    # plt.title('pitch')
 
-    plt.subplot(3,1,3)
-    plt.plot(np.arange(T-1), yaw_ukf.reshape(-1))
-    plt.title('yaw')
+    # plt.subplot(3,1,3)
+    # plt.plot(np.arange(T-1), yaw_ukf.reshape(-1))
+    # plt.title('yaw')
+    # plt.show()
+
+    mu_q_plot = np.array(mu_q_plot)
+    cov_q_plot = np.array(cov_q_plot)
+    mu_w_plot = np.array(mu_w_plot)
+    cov_w_plot = np.array(cov_w_plot)
+    axis_names = ['x', 'y', 'z']
+    
+    plt.subplot(2,2,1)
+    for i in range(4):
+        plt.plot(np.arange(T-1), mu_q_plot[:,i], label='q'+str(i))
+    plt.title('Orientation (Quaternion)')
+    plt.ylabel('Mean')
+    plt.legend()
+    plt.subplot(2,2,2)
+    for i in range(3):
+        plt.plot(np.arange(T-1), cov_q_plot[:,i], label='A'+axis_names[i])
+    plt.ylabel('Covariance')
+    plt.legend()
+    # plt.show()
+
+    plt.subplot(2,2,3)
+    for i in range(3):
+        plt.plot(np.arange(T-1), mu_w_plot[:,i], label='W'+axis_names[i])
+    plt.title('Angular velocities')
+    plt.ylabel('Mean')
+    plt.legend()
+    plt.subplot(2,2,4)
+    for i in range(3):
+        plt.plot(np.arange(T-1), cov_w_plot[:,i], label='W'+axis_names[i])
+    plt.ylabel('Covariance')
+    plt.legend()
     plt.show()
 
     return roll_ukf, pitch_ukf, yaw_ukf
@@ -226,11 +274,11 @@ def propagating_q(sigma_q, Q_bar):
         Q_bar = Q_error_bar * Q_bar
     # print('error_norm: ', error_norm[iter])    
 
-    sigma_cov_q = np.zeros((3,3))
-    for i in range(2*n):
-        # sigma_cov_q += (error[:,i] - error_bar).reshape(3,1) @ (error[:,i] - error_bar).reshape(1,3) /(2*n)
-        sigma_cov_q += (error[:,i]).reshape(3,1) @ (error[:,i]).reshape(1,3) /(2*n)
-    return Q_bar, sigma_cov_q
+    # sigma_cov_q = np.zeros((3,3))
+    # for i in range(2*n):
+    #     # sigma_cov_q += (error[:,i] - error_bar).reshape(3,1) @ (error[:,i] - error_bar).reshape(1,3) /(2*n)
+    #     sigma_cov_q += (error[:,i]).reshape(3,1) @ (error[:,i]).reshape(1,3) /(2*n)
+    return Q_bar, error# sigma_cov_q, error
 
 def propagating_w(mu_k_k, sqrt_cov_cols):
     ''' 
@@ -243,24 +291,29 @@ def propagating_w(mu_k_k, sqrt_cov_cols):
     - sigma_mu_w: mean estimate of angular velos in sigma points (angular velo part of mu_{k+1|k})
     - sigma_cov_w: covariance estimate of state cov_k1_k (3x3 matrix)
     '''
-    # print(mu_k_k)
-    # print(sqrt_cov_cols)
     n=6
     weight = 1/(2*n)
     sigma_w = np.array([np.array(mu_k_k[1:4]).reshape(-1) + sqrt_cov_cols[3:, 0] for i in range(2*n)]).T 
     # mu
     # sigma_mu_w = np.array([ np.sum(weight * (R[-j] + sigma_w[j, :])) for j in range(3)])
     sigma_mu_w = np.array([ np.sum(weight * sigma_w[j, :]) for j in range(3)]) 
-    # print(sigma_mu_w)
     # cov
-    sigma_cov_w = np.zeros((3,3))
-    for i in range(2*n):
-        # diff = ((R[3:] + sigma_w[:,i]) - sigma_mu_w).reshape(3,1)
-        diff = ( sigma_w[:,i] - sigma_mu_w).reshape(3,1)
-        sigma_cov_w += weight * (diff @ diff.T)
-    
-    return sigma_w, sigma_mu_w, sigma_cov_w
+    # sigma_cov_w = np.zeros((3,3))
+    # for i in range(2*n):
+    #     # diff = ((R[3:] + sigma_w[:,i]) - sigma_mu_w).reshape(3,1)
+    #     diff = ( sigma_w[:,i] - sigma_mu_w).reshape(3,1)
+    #     sigma_cov_w += weight * (diff @ diff.T)
+    return sigma_w, sigma_mu_w#, sigma_cov_w
 
+def a_priori_cov(error, sigma_w, sigma_mu_w):
+    n=6
+    sigma_cov = np.zeros((6,6))
+    for i in range(2*n):
+        Wi_prime = np.append(error[:,i], sigma_w[:,i] - sigma_mu_w)
+        # print(Wi_prime)
+        sigma_cov += Wi_prime.reshape(6,1) @ Wi_prime.reshape(1,6) /(2*n)
+    return sigma_cov
+    
 
 def measurement_transform(x_q, x_w):
     '''
@@ -277,11 +330,11 @@ def measurement_transform(x_q, x_w):
     y_rot = []
     y_acc = []
     for i in range(2*n):
-        y_rot.append(x_w[:,i])
+        y_rot.append(x_w[:,i])# + Q[3:])
         
         quat = Quaternion(scalar=x_q[i][0], vec=x_q[i][1:4])
         g_prime = quat.inv() * g * quat
-        y_acc.append(g_prime.vec())
+        y_acc.append(g_prime.vec())# + Q[:3])
     return y_rot, y_acc
 
 
@@ -314,43 +367,12 @@ def process_model(x_q_k, x_w_k, R, dt):
 
 # ===================================
 # Methods for measurement calibration
-'''
-# def rotation_angles(matrix):
-#     r11, r12, r13 = matrix[0]
-#     r21, r22, r23 = matrix[1]
-#     r31, r32, r33 = matrix[2]
 
-#     yaw = np.arctan2(r21, r11) # alpha #z
-#     pitch = np.arctan2(-r31, np.sqrt(r32**2 + r33**2)) #beta #y
-#     roll = np.arctan2(r32, r33) #sigma #x
-#     # Calculate the roll, pitch, and yaw angles
-#     # pitch = np.arcsin(-R[2,0])
-#     # roll = np.arctan2(R[2,1]/np.cos(pitch), R[2,2]/np.cos(pitch))
-#     # yaw = np.arctan2(R[1,0]/np.cos(pitch), R[0,0]/np.cos(pitch))
-
-#     return roll,pitch,yaw
-'''
 
 def accel_2_euler(accel):
     pitch = np.hstack([np.arcsin(accel[0,t]/ 9.81) for t in range(np.shape(accel)[1])])
     roll = np.hstack([math.atan2(accel[1,t], accel[2,t]) for t in range(np.shape(accel)[1])])
     return np.vstack((roll, pitch))
-
-'''
-# def R_matrix_rotation(roll, pitch, yaw):
-#     Rx = np.array([[1, 0, 0],
-#                 [0, np.cos(roll), -np.sin(roll)],
-#                 [0, np.sin(roll), np.cos(roll)]])
-
-#     Ry = np.array([[np.cos(pitch), 0, np.sin(pitch)],
-#                 [0, 1, 0],
-#                 [-np.sin(pitch), 0, np.cos(pitch) ]])
-
-#     Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0],
-#                 [np.sin(yaw), np.cos(yaw), 0],
-#                 [0, 0, 1]])
-#     return Rx @ Ry @ Rz
-'''
 
 def accel_calibration(accel, bias, sensitivity):
     ''' Input: raw accel shape(3,T), bias shape(3,), sensitivity shape(3,)
@@ -396,8 +418,7 @@ def gyro_calib_params(gyro):
     return bias, sensitivity
 
 
-# roll, pitch, yaw = 
-estimate_rot()
+roll, pitch, yaw = estimate_rot()
 
 
 

@@ -38,7 +38,7 @@ class Quaternion:
         else:
             axis = np.array([1,0,0])
         self.q[0] = math.cos(angle/2)
-        self.q[1:4] = axis*math.sin(angle/2)
+        self.q[1:4] = axis*np.sin(angle/2)
         #self.normalize()
 
     def from_rotm(self, R):
